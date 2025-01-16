@@ -1,3 +1,6 @@
 [submodule "Avi_ESP_Libs"]
 	path = Avi_ESP_Libs
 	url = git@github.com:CREATE-ROCKET/Avi_ESP_Libs.git
+[submodule "lib"]
+	path = lib
+	url = git@github.com:CREATE-ROCKET/Avi_ESP_Libs.git
