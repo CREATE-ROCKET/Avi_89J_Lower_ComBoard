@@ -20,7 +20,16 @@
 #define SCK 27
 #define FLASH_CS 2
 #define SPI_FREQUENCY 5000000
+
 #define LED 13
+
+char landing_point[80];
+char gps_data[80];
+int gps_index = 0; //1回のループでのGPGGA表示の一文字を保存する位置
+uint32_t flash_address = 0x00;
+uint8_t tx[256];
+bool landing = false;
+bool liftoff = false;
 
 CAN_CREATE CAN;
 SPICREATE::SPICreate SPIC1;
@@ -30,7 +39,7 @@ void setup()
 {
   Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 18ch
   Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 26ch
-  Serial.begin(115200);
+  Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
   // while (!Serial);
 
   Serial1.println("COMBOARD");
@@ -40,8 +49,11 @@ void setup()
   pinMode(FLASH_CS, OUTPUT);
   digitalWrite(FLASH_CS, HIGH);
 
-  pinMode(LED, OUTPUT);
+  pinMode(LED, OUTPUT); /* 通電確認用のLED */
   digitalWrite(LED, HIGH);
+
+  pinMode(GPS_SW, OUTPUT);
+  digitalWrite(GPS_SW, LOW);
 
   CAN.setPins(CAN_RX, CAN_TX);
   // start the CAN bus at 100 kbps
@@ -59,34 +71,93 @@ void loop()
   {
     char cmd = Serial1.read();
     Serial1.print("Serial1");
+    Serial1.print(" Sending packet ... ");
     Serial1.println(cmd);
-    Serial.println(cmd);
-    // Serial1.print("Sending packet ... ");
 
     /* CAN send */
-    uint8_t ercd = CAN.sendPacket(0x13, cmd);
-    switch (ercd)
+    if (cmd == 'h')
     {
-    case CAN_OK:
-      Serial1.println("done");
-      break;
-    case ACK_ERROR:
-      Serial1.println("ACK ERROR");
-      break;
-    case PAR_ERROR:
-      Serial1.println("PAR ERROR");
-      break;
-    default:
-      break;
+      /* GPSロギング、計測開始 */
+      digitalWrite(GPS_SW, HIGH);
+      Serial1.println("GPS START!");
+    }
+    else if (cmd == 'g')
+    {
+      /* GPSロギング、計測終了 */
+      digitalWrite(GPS_SW, LOW);
+      Serial1.println("GPS STOP!");
+    }
+    else if (cmd == 'f')
+    {
+      /* メモリデータ消去 */
+      flash1.erase();
+      Serial1.println("ERASED!");
+      flash_address = 0x00;
+    }
+    else
+    {
+      uint8_t ercd = CAN.sendPacket(0x13, cmd);
+      switch (ercd)
+      {
+      case CAN_OK:
+        Serial1.println("done");
+        break;
+      case ACK_ERROR:
+        Serial1.println("ACK ERROR");
+        break;
+      case PAR_ERROR:
+        Serial1.println("PAR ERROR");
+        break;
+      default:
+        break;
+      }
     }
   }
 
   if (CAN.available())
   {
-    char CAN_cmd = (char)CAN.read();
+    char can_read = (char)CAN.read();
     Serial1.print("CAN RECEIVED !! :");
-    Serial1.print(CAN_cmd);
-    Serial2.print("CAN RECEIVED !! :");
-    Serial2.print(CAN_cmd);
+    Serial1.print(can_read);
+  }
+
+  if (Serial.available())
+  {
+    // GPS
+    char gps_read = Serial.read();
+    Serial1.write(gps_read);
+
+    gps_data[gps_index] = gps_read;
+    gps_index++;
+
+    if (liftoff)
+    {
+      Serial1.println("LIFTOFF");
+      Serial2.println("LIFTOFF");
+      liftoff = false;
+    }
+
+    if (gps_read == 0x0A || gps_index > 80) // 終端文字、またはGPGGAの表示列が一個分終わったとき
+    {
+
+      Serial1.print("GPS: ");
+      Serial1.println(gps_data);
+      Serial2.print("HONTAI_GPS: ");
+      Serial2.println(gps_data);
+
+      for (int i = 0; i < 80; i++)
+      {
+        gps_data[i] = 0x00;
+      }
+    }
+
+    if (landing)
+    {
+      Serial1.print("LANDINGPOINT: ");
+      Serial1.println(landing_point);
+      Serial2.print("LANDINGPOINT: ");
+      Serial2.println(landing_point);
+      delay(1000);
+    }
   }
 }
