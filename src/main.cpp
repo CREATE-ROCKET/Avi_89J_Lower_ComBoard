@@ -25,9 +25,9 @@
 
 char landing_point[80];
 char gps_data[80];
-int gps_index = 0; //1回のループでのGPGGA表示の一文字を保存する位置
+int gps_index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
 uint32_t flash_address = 0x00;
-uint8_t tx[256];
+uint8_t tx[256] = {};
 bool landing = false;
 bool liftoff = false;
 
@@ -144,11 +144,13 @@ void loop()
       Serial1.println(gps_data);
       Serial2.print("HONTAI_GPS: ");
       Serial2.println(gps_data);
-
       for (int i = 0; i < 80; i++)
       {
+        tx[i] = gps_data[i];
         gps_data[i] = 0x00;
       }
+      flash1.write(flash_address, tx);
+      flash_address += 0x100;
     }
 
     if (landing)
