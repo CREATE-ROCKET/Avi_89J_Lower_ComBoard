@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <CAN/CAN.h>
+#include <CANCREATE 1.0.0/CANCREATE.h>
 #include <SPICREATE.h>
 #include <SPIflash.h>
 
@@ -14,6 +14,7 @@
 #define GPS_RXD_TX 14
 #define GPS_TXD_RX 4
 #define GPS_SW 32
+#define LANDING_START_INDEX 44
 
 #define MISO 15
 #define MOSI 21
@@ -23,15 +24,21 @@
 
 #define LED 13
 
-char landing_point[80];
-char gps_data[80];
+char landing_point[100];
+char gps_data[100] = {};
 int gps_index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
 uint32_t flash_address = 0x00;
-uint8_t tx[256] = {};
-bool landing = false;
+uint8_t tx_gps[256] = {};
+uint8_t tx_pitot[256] = {};
+bool top = false;
 bool liftoff = false;
+char pitot_data[256] = {};
+int pitot_index = 0;
+int liftoff_count = 0;
+int top_count = 0;
 
-CAN_CREATE CAN;
+// int test_count = 0; // 通信試験用
+CAN_CREATE CAN(true);
 SPICREATE::SPICreate SPIC1;
 Flash flash1;
 
@@ -40,6 +47,7 @@ void setup()
   Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 18ch
   Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 26ch
   Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
+  // Serial.begin(115200); //通信試験用
   // while (!Serial);
 
   Serial1.println("COMBOARD");
@@ -55,18 +63,43 @@ void setup()
   pinMode(GPS_SW, OUTPUT);
   digitalWrite(GPS_SW, LOW);
 
-  CAN.setPins(CAN_RX, CAN_TX);
   // start the CAN bus at 100 kbps
-  if (!CAN.begin(100E3))
+  if (CAN.begin(100E03, CAN_RX, CAN_TX, 10)) // 新しいcanライブラリ
   {
     Serial1.println("Starting CAN failed!");
     while (1)
       ;
   }
+
+  // switch (CAN.test()) //CANデバッグ用
+  // {
+  // case CAN_SUCCESS:
+  //   Serial1.println("Success!!!");
+  //   break;
+  // case CAN_UNKNOWN_ERROR:
+  //   Serial1.println("Unknown error occurred");
+  //   break;
+  // case CAN_NO_RESPONSE_ERROR:
+  //   Serial1.println("No response error");
+  //   break;
+  // case CAN_CONTROLLER_ERROR:
+  //   Serial1.println("CAN CONTROLLER ERROR");
+  //   break;
+  // default:
+  //   break;
+  // }
 }
 
 void loop()
 {
+  // Serial.println(test_count);
+  // Serial1.println(test_count);
+  // test_count++;
+  // delay(100);
+  // if(test_count > 100)
+  // {
+  //   test_count = 0;
+  // }
   if (Serial1.available())
   {
     char cmd = Serial1.read();
@@ -90,35 +123,79 @@ void loop()
     else if (cmd == 'f')
     {
       /* メモリデータ消去 */
-      flash1.erase();
-      Serial1.println("ERASED!");
-      flash_address = 0x00;
+      // flash1.erase();
+      // Serial1.println("ERASED!");
+      // flash_address = 0x00;
     }
     else
     {
-      uint8_t ercd = CAN.sendPacket(0x13, cmd);
-      switch (ercd)
+      if (CAN.sendChar(cmd))
       {
-      case CAN_OK:
-        Serial1.println("done");
-        break;
-      case ACK_ERROR:
-        Serial1.println("ACK ERROR");
-        break;
-      case PAR_ERROR:
-        Serial1.println("PAR ERROR");
-        break;
-      default:
-        break;
+        Serial1.println("failed to send CAN data");
       }
     }
   }
 
   if (CAN.available())
   {
-    char can_read = (char)CAN.read();
-    Serial1.print("CAN RECEIVED !! :");
-    Serial1.print(can_read);
+
+    char can_data[9]; // 最大8文字+改行文字が送信される
+    if (CAN.readLine((char *)can_data))
+    {
+      // エラーの場合の処理
+      Serial1.println("failed to get CAN data");
+    }
+    else
+    {
+
+      for (int i = 0; i < 3; i++)
+      {
+        Serial1.printf("Can received!!!: %hu\r\n", can_data[i]);
+      }
+      if (can_data[0] == 'l') // liftoff
+      {
+        liftoff = true;
+      }
+      if (can_data[0] == 't') // 頂点検知
+      {
+        top = true;
+      }
+    }
+  }
+
+  if (Serial2.available())
+  {
+    pitot_data[pitot_index] = Serial2.read();
+    pitot_index++;
+    // if (pitot_index >)
+    // {
+    //   for (int i = 0; i <; i++)
+    //   {
+    //     tx_pitot_data[i]
+    //   }
+    // }
+  }
+
+  if (liftoff)
+  {
+    Serial1.println("LIFTOFF");
+    Serial2.println("LIFTOFF");
+    liftoff_count++;
+    if (liftoff_count > 5)
+    {
+      liftoff = false;
+    }
+  }
+
+  if (top)
+  {
+    Serial1.println("kaisan");
+    Serial2.println("kaisan");
+    top_count++;
+    if (top_count > 5)
+    {
+      top = false;
+    }
   }
 
   if (Serial.available())
@@ -130,36 +207,28 @@ void loop()
     gps_data[gps_index] = gps_read;
     gps_index++;
 
-    if (liftoff)
-    {
-      Serial1.println("LIFTOFF");
-      Serial2.println("LIFTOFF");
-      liftoff = false;
-    }
-
     if (gps_read == 0x0A || gps_index > 80) // 終端文字、またはGPGGAの表示列が一個分終わったとき
     {
-
       Serial1.print("GPS: ");
-      Serial1.println(gps_data);
-      Serial2.print("HONTAI_GPS: ");
-      Serial2.println(gps_data);
       for (int i = 0; i < 80; i++)
       {
-        tx[i] = gps_data[i];
-        gps_data[i] = 0x00;
+        Serial1.printf("%c", gps_data[i]);
       }
-      flash1.write(flash_address, tx);
-      flash_address += 0x100;
+      // Serial1.println(gps_data);
+      //  for (int i = 0; i < 80; i++)
+      //  {
+      //    tx_gps[i] = gps_data[i];
+      //  }
+      //  flash1.write(flash_address, tx_gps);
+      //  flash_address += 0x100;
+      gps_index = 0;
     }
 
-    if (landing)
-    {
-      Serial1.print("LANDINGPOINT: ");
-      Serial1.println(landing_point);
-      Serial2.print("LANDINGPOINT: ");
-      Serial2.println(landing_point);
-      delay(1000);
-    }
+    // if (landing)
+    // {
+    //   Serial1.print("LANDINGPOINT: ");
+    //   Serial1.println(landing_point);
+    //   delay(1000);
+    // }
   }
 }
