@@ -24,29 +24,58 @@
 
 #define LED 13
 
-char gps_data[100] = {};
-// char gps_checksum[100] = {};
-// int checksum = 0;
-// int correct_checksum;
-// float gps_height = 0;
-int gps_index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
-uint32_t flash_address = 0x00;
 uint8_t tx_gps[256] = {};
 uint8_t tx_pitot[256] = {};
 bool top = false;
 bool liftoff = false;
 int liftoff_count = 0; // 冗長性のため
 int top_count = 0;     // 冗長性のため
-double pitot_data[256] = {};
-int pitot_index = 0;
-int pitot_count = 0;
+// char gps_data[100] = {};
+// char gps_parsed[100] = {};
+// int checksum = 0;
+// int correct_checksum;
+// float gps_height = 0;
+// int gps_index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
+// uint32_t gps_flash_address = 0x00;
+// uint32_t pitot_flash_address = 0x1000000; // 128Mbitの半分　0x2000000
+// char pitot_data[100] = {};
+// int pitot_index = 0;
+// int pitot_count = 0;
 // int gps_count = 0;
 // int consume_count = 0;
 // int gate_num = 0;
 // int checksum_index = 0;
-char *endptr;
+// int checksum_1 = 0;
+// int checksum_2 = 0;
+typedef struct
+{
+  char data[100] = {};
+  int index = 0;
+  int count = 0;
+  uint32_t flash_address = 0x1000000; // 128Mbitの半分　0x2000000
+} PITOT;
+
+typedef struct
+{
+  char data[100] = {};
+  int index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
+  int count = 0;
+  uint32_t flash_address = 0x00;
+  char parsed[100] = {}; // チェックサムの計算のためNMEAフォーマットの$と*を除外
+} GPS;
+
+typedef struct
+{
+  int correct;
+  int index = 0;
+  int gps = 0;
+  int tmp[2] = {};
+} CHECKSUM;
 
 // int test_count = 0; // 通信試験用
+PITOT pitot;
+GPS gps;
+CHECKSUM checksum;
 CAN_CREATE CAN(true);
 SPICREATE::SPICreate SPIC1;
 Flash flash1;
@@ -123,7 +152,7 @@ void loop()
       digitalWrite(GPS_SW, HIGH);
       Serial1.println("GPS START !!!");
     }
-    else if (cmd == 'h')
+    else if (cmd == 'q')
     {
       /* GPSロギング、計測終了 */
       digitalWrite(GPS_SW, LOW);
@@ -134,7 +163,8 @@ void loop()
       /* メモリデータ消去 */
       flash1.erase();
       Serial1.println("ERASED !!!");
-      flash_address = 0x00;
+      gps.flash_address = 0x00;
+      pitot.flash_address = 0x1000000;
     }
     else
     {
@@ -174,25 +204,25 @@ void loop()
 
   if (Serial2.available())
   {
-    char tmp = Serial2.read();
-    pitot_data[pitot_index] = stdtod(tmp, &endtpr);
-    if(pitot_data[pitot_index] == '\n') //終了
+    pitot.data[pitot.index] = Serial2.read();
+    if (pitot.data[pitot.index] == '\n') // 終了
     {
-      for (int i = 0; i < pitot_index; i++)
+      for (int i = 0; i < pitot.index; i++)
       {
-        tx_pitot[i] = pitot_data[pitot_index];
+        tx_pitot[i] = pitot.data[pitot.index];
       }
-      flash1.write(flash_address, tx_pitot);
+      flash1.write(pitot.flash_address, tx_pitot);
+      pitot.flash_address += 0x1000100;
+      pitot.index = -1;
     }
-    stdtod();
-    pitot_index++;
+    pitot.index++;
   }
 
   if (liftoff)
   {
     // Serial1.printf("Height: %f ", gps_height);
     Serial1.println("LIFTOFF !!!");
-    Serial2.println("LIFTOFF !!!");
+    Serial2.println('l');
     liftoff_count++;
     if (liftoff_count > 5) // 冗長性の確保
     {
@@ -204,7 +234,7 @@ void loop()
   {
     // Serial1.printf("Height: %f ", gps_height);
     Serial1.println("PARACHUTE OPENED !!!");
-    Serial2.println("PARACHUTE OPENED !!!");
+    Serial2.println('t');
     top_count++;
     if (top_count > 5) // 冗長性の確保
     {
@@ -218,47 +248,65 @@ void loop()
     char gps_read = Serial.read();
     Serial1.write(gps_read);
 
-    gps_data[gps_index] = gps_read;
-    gps_index++;
+    gps.data[gps.index] = gps_read;
+    gps.index++;
 
-    if (gps_read == 0x0A || gps_index > 80) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
+    if (gps_read == 0x0A) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
     {
       Serial1.print("GPS: ");
-      for (int i = 0; i < 80; i++)
+      for (int i = 0; i < 82; i++)
       {
-        Serial1.printf("%c", gps_data[i]);
-        Serial2.printf("%c", gps_data[i]);
+        Serial1.printf("%c", gps.data[i]);
+        Serial2.printf("%c", gps.data[i]);
         if (i == 79)
         {
           Serial1.println();
           Serial2.println();
         }
       }
-      gps_index = 0;
-      // checksum_index = 0;
-      // while (gps_data[checksum_index] != '*') // チェックサムの計算のためNMEAフォーマットの$と*を除外
+      // gps.index = 0;
+      // checksum.index = 0;
+      // while (gps.data[checksum.index] != '*') // チェックサムの計算のためNMEAフォーマットの$と*を除外
       // {
-      //   if (gps_data[checksum_index] == '$')
+      //   if (gps.data[checksum.index] == '$')
       //   {
       //   }
       //   else
       //   {
-      //     gps_checksum[checksum_index] = gps_data[checksum_index];
+      //     gps.parsed[checksum.index] = gps.data[checksum.index];
       //   }
-      //   checksum_index++;
+      //   checksum.index++;
       // }
-      // correct_checksum = 16 * (int)gps_checksum[checksum_index + 1] + (int)gps_checksum[checksum_index + 2]; // 16進数のチェックサムを10進数に変換
+      // if ((u_int)gps.parsed[checksum.index + 1] > (int)'0')
+      // {
+      //   checksum.tmp[0] = (u_int)gps.parsed[checksum.index + 1] - (int)'A' + 10;
+      // }
+      // else
+      // {
+      //   checksum.tmp[0] = (u_int)gps.parsed[checksum.index + 1] - (int)'0';
+      // }
+      // if ((u_int)gps.parsed[checksum.index + 2] > (int)'0')
+      // {
+      //   checksum.tmp[1] = (u_int)gps.parsed[checksum.index + 2] - (int)'A' + 10;
+      // }
+      // else
+      // {
+      //   checksum.tmp[1] = (u_int)gps.parsed[checksum.index + 2] - (int)'0';
+      // }
+      // checksum.correct = 16 * checksum.tmp[0] + checksum.tmp[1]; // 16進数のチェックサムを10進数に変換
+      // Serial1.printf("correct checksum: %d", checksum.correct);  // デバッグ用
 
-      // for (int i = 0; i < (checksum_index + 6); i++) // チェックサムの計算　+6はnmea formatで*の後のチェックサム2桁+\r\n
+      // for (int i = 0; i < (checksum.index + 6); i++) // チェックサムの計算　+6はnmea formatで*の後のチェックサム2桁+\r\n
       // {
-      //   checksum ^= (int)gps_checksum[i];
+      //   checksum.gps ^= (int)gps.parsed[i];
       // }
-      // gps_count = 0;
-      // consume_count = 0;
-      // gate_num = 0;
-      // if (checksum == correct_checksum)
+      // // gps_count = 0;
+      // // consume_count = 0;
+      // // gate_num = 0;
+      // if (checksum.gps == checksum.correct)
       // {
-      //   // Serial1.printf("CHECKSUM CORRECT!!!\r\n"); 
+      //   Serial1.printf("CHECKSUM OK!!!\r\n");
+      // }
       //   for (int i = 0; i < (checksum_index + 6); i++)
       //   {
       //     if (gps_checksum[i] == ',')
@@ -303,13 +351,14 @@ void loop()
       //   Serial1.printf("HEIGHT: ");
       //   Serial1.printf("%f\r\n", gps_height);
       // }
-
+      Serial.println("hoge hoge");
       for (int i = 0; i < 80; i++)
       {
-        tx_gps[i] = gps_data[i];
+        tx_gps[i] = gps.data[i];
       }
-      flash1.write(flash_address, tx_gps);
-      flash_address += 0x100;
+      flash1.write(gps.flash_address, tx_gps);
+      gps.flash_address += 0x100;
+      Serial.println("hoge");
     }
   }
 }
