@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <stdlib.h>
-#include <CANCREATE 1.0.0/CANCREATE.h>
+#include <CANCREATE.h>
 #include <SPICREATE.h>
 #include <SPIflash.h>
 
@@ -82,8 +82,8 @@ Flash flash1;
 
 void setup()
 {
-  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 18ch
-  Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 26ch
+  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back); // 本部 18ch
+  //Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 26ch
   Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
   // Serial.begin(115200); //通信試験用
   // while (!Serial);
@@ -193,11 +193,11 @@ void loop()
       }
       if (can_data[0] == 'l') // liftoff
       {
-        liftoff = true;
+        liftoff = 1;
       }
       if (can_data[0] == 't') // 頂点検知・開傘
       {
-        top = true;
+        top = 1;
       }
     }
   }
@@ -223,11 +223,11 @@ void loop()
     // Serial1.printf("Height: %f ", gps_height);
     Serial1.println("LIFTOFF !!!");
     Serial2.println('l');
-    liftoff_count++;
-    if (liftoff_count > 5) // 冗長性の確保
-    {
-      liftoff = false;
-    }
+    // liftoff_count++;
+    // if (liftoff_count > 5) // 冗長性の確保
+    // {
+    liftoff = 0;
+    // }
   }
 
   if (top)
@@ -235,11 +235,11 @@ void loop()
     // Serial1.printf("Height: %f ", gps_height);
     Serial1.println("PARACHUTE OPENED !!!");
     Serial2.println('t');
-    top_count++;
-    if (top_count > 5) // 冗長性の確保
-    {
-      top = false;
-    }
+    // top_count++;
+    // if (top_count > 5) // 冗長性の確保
+    // {
+    top = 0;
+    // }
   }
 
   if (Serial.available())
@@ -250,21 +250,20 @@ void loop()
 
     gps.data[gps.index] = gps_read;
     gps.index++;
-
     if (gps_read == 0x0A) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
     {
       Serial1.print("GPS: ");
-      for (int i = 0; i < 82; i++)
+      for (int i = 0; i < 100; i++)
       {
         Serial1.printf("%c", gps.data[i]);
         Serial2.printf("%c", gps.data[i]);
-        if (i == 79)
+        if (i == gps.index)
         {
           Serial1.println();
           Serial2.println();
         }
       }
-      // gps.index = 0;
+      gps.index = 0;
       // checksum.index = 0;
       // while (gps.data[checksum.index] != '*') // チェックサムの計算のためNMEAフォーマットの$と*を除外
       // {
@@ -307,6 +306,7 @@ void loop()
       // {
       //   Serial1.printf("CHECKSUM OK!!!\r\n");
       // }
+
       //   for (int i = 0; i < (checksum_index + 6); i++)
       //   {
       //     if (gps_checksum[i] == ',')
@@ -351,14 +351,16 @@ void loop()
       //   Serial1.printf("HEIGHT: ");
       //   Serial1.printf("%f\r\n", gps_height);
       // }
-      Serial.println("hoge hoge");
+      // Serial.println("hoge hoge");//デバッグ用
       for (int i = 0; i < 80; i++)
       {
         tx_gps[i] = gps.data[i];
       }
       flash1.write(gps.flash_address, tx_gps);
       gps.flash_address += 0x100;
-      Serial.println("hoge");
+
+      // Serial.println("hoge");//デバッグ用
+      // }
     }
   }
 }
