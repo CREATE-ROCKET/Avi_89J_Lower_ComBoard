@@ -35,7 +35,7 @@ typedef struct
   // int count = 0;
   uint32_t flash_address = 0x1000000; // 128Mbitの半分　0x2000000
   bool flash_ok = false;              // flash書き込み開始・終了に用いる
-} PITOT;
+} PITOT;                              // 送られてくるピトー管のデータを保管するための構造体
 
 typedef struct
 {
@@ -45,7 +45,7 @@ typedef struct
   uint32_t flash_address = 0x00;
   bool flash_ok = false; // flash書き込み開始・終了に用いる
   // char parsed[100] = {}; // チェックサムの計算のためNMEAフォーマットの$と*を除外
-} GPS;
+} GPS; // 取得したGPSデータを扱う構造体
 
 typedef struct
 {
@@ -63,17 +63,17 @@ typedef struct
   int hour = 0;
   int min = 0;
   int sec = 0;
-} STATUS;
+} ST; // 機体が離床した・頂点に来たなどを判別する構造体
 
 // int test_count = 0; // 通信試験用
 PITOT pitot;
 GPS gps;
 TIME time;
-STATUS liftoff;
-STATUS top;
+ST liftoff;
+ST top;
 CAN_CREATE CAN(true);
-SPICREATE::SPICreate SPIC1;
-Flash flash1;
+SPICREATE::SPICreate SPIC1; // platformio.iniで@4.2.0に固定しないと動かない
+Flash flash1;               // platformio.iniで@4.2.0に固定しないと動かない
 
 void setup()
 {
@@ -188,7 +188,7 @@ void loop()
     }
     else
     {
-      switch (Data.size)
+      switch (Data.size) // CANで受け取る文字数で場合分け
       {
       case 1:
         switch (Data.data[0])
@@ -268,21 +268,29 @@ void loop()
 
   if (Serial2.available())
   {
-    char pitot_read = Serial2.read();
-    pitot.data[pitot.index] = pitot_read;
-    pitot.index++;
-    if (pitot_read == '\n') // 終了
+    char cmd_2 = Serial2.read();
+    switch (cmd_2)
     {
-      for (int i = 0; i < pitot.index; i++)
+    case 'q': // 上段のコマンドは無視
+    case 'e': // 上段のコマンドは無視
+    case 's': // 上段のコマンドは無視
+    default:
+      char pitot_read = cmd_2;
+      pitot.data[pitot.index] = pitot_read;
+      pitot.index++;
+      if (pitot_read == '\n') // 終了
       {
-        tx_pitot[i] = pitot.data[pitot.index];
+        for (int i = 0; i < pitot.index; i++)
+        {
+          tx_pitot[i] = pitot.data[pitot.index];
+        }
+        if (pitot.flash_ok) // flashの書き込み開始
+        {
+          flash1.write(pitot.flash_address, tx_pitot);
+          pitot.flash_address += 0x1000100;
+        }
+        pitot.index = 0;
       }
-      if (pitot.flash_ok) // flashの書き込み開始
-      {
-        flash1.write(pitot.flash_address, tx_pitot);
-        pitot.flash_address += 0x1000100;
-      }
-      pitot.index = 0;
     }
   }
 
