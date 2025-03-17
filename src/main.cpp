@@ -35,7 +35,7 @@ typedef struct
   char data[100] = {};
   int index = 0;
   int count = 0;
-  uint32_t flash_address = 0x1000000; // 128Mbitの半分　0x2000000
+  uint32_t flash_address = 0x1000000; // 128Mbitの半分　最大:0x2000000
   bool flash_ok = false;
 } PITOT;
 
@@ -49,18 +49,9 @@ typedef struct
   bool flash_ok = false;
 } GPS;
 
-// typedef struct
-// {
-//   int correct;
-//   int index = 0;
-//   int gps = 0;
-//   int tmp[2] = {};
-// } CHECKSUM;
-
 // int test_count = 0; // 通信試験用
 PITOT pitot;
 GPS gps;
-// CHECKSUM checksum;
 CAN_CREATE CAN(true);
 SPICREATE::SPICreate SPIC1;
 Flash flash1;
@@ -130,14 +121,13 @@ void loop()
     Serial1.print(" Sending packet ... ");
     Serial1.println(cmd);
 
-    /* CAN send */
     if (cmd == 'g')
     {
       /* GPSロギング、計測開始 */
       digitalWrite(GPS_SW, HIGH);
       Serial1.println("GPS START !!!");
     }
-    else if (cmd == 'q')
+    else if (cmd == 'Q')
     {
       /* GPSロギング、計測終了 */
       digitalWrite(GPS_SW, LOW);
@@ -154,9 +144,10 @@ void loop()
       gps.flash_address = 0x00;
       pitot.flash_address = 0x1000000;
     }
-    else if (cmd == 's')
+    else if (cmd == 'S')
     {
       /*シーケンス開始(flashの書き込み開始)*/
+      Serial1.printf("FLASH START!!!\r\n");
       gps.flash_ok = true; // flashの書き込み開始
       pitot.flash_ok = true;
     }
@@ -194,19 +185,27 @@ void loop()
           }
           else
           {
-            Serial1.printf("Can received!!!: %d\n\r", Data.data[0]);
+            Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
           }
+          break;
+        default: // 数字のとき0以外の適当な値
+          // int *tmp = reinterpret_cast<int *>(Data.data[0]);
+          // Serial1.printf("%d\r\n", *tmp);
+          Serial1.printf("%d\r\n", Data.data[0]);
+          break;
         }
-        break;
-      default:
-        Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
         break;
       case 2:
         Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 2; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
+        // if (*(reinterpret_cast<int *>(Data.data[0])) == 189) // lpsのWhoAMI値
+        // {
+        // }
+        // // ICM
+        if (Data.data[0])
+          for (int i = 0; i < 2; i++)
+          {
+            Serial1.printf("%c", Data.data[i]);
+          }
         Serial1.printf("\r\n");
         break;
       case 3:
@@ -256,12 +255,15 @@ void loop()
         }
         Serial1.printf("\r\n");
         break;
+      default:
+        Serial1.printf("Unexpected Can data!!!\r\n");
       }
     }
   }
 
   if (Serial2.available())
   {
+
     char pitot_read = Serial2.read();
     pitot.data[pitot.index] = pitot_read;
     pitot.index++;
@@ -274,9 +276,18 @@ void loop()
       if (pitot.flash_ok) // flashの書き込み開始
       {
         flash1.write(pitot.flash_address, tx_pitot);
-        pitot.flash_address += 0x1000100;
+        pitot.flash_address += 0x100;
       }
       pitot.index = 0;
+    }
+    if (pitot.flash_ok) // flashの書き込み開始
+    {
+      flash1.write(pitot.flash_address, tx_pitot);
+      pitot.flash_address += 0x100;
+    }
+    if (pitot.flash_address == 0x2000000)
+    {
+      pitot.flash_ok = false;
     }
   }
 
