@@ -228,16 +228,14 @@ void loop()
         if (Data.data[0] == 189) // lpsのWhoAmI値
         {
           Serial1.printf("LPS Data: ");
-          char lps_data[4] = {Data.data[1], Data.data[2], Data.data[3], Data.data[4]};
-          int *tmp = reinterpret_cast<int *>(lps_data);
-          Serial1.printf("%d\r\n", *tmp);
+          int *lps_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t));
+          Serial1.printf("%d\r\n", *lps_data);
         }
         else if (Data.data[0] == 18) // ICMのWhoAmI
         {
           Serial1.printf("ICM Data: ");
-          char icm_data[4] = {Data.data[1], Data.data[2], Data.data[3], Data.data[4]};
-          int *tmp = reinterpret_cast<int *>(icm_data);
-          Serial1.printf("%d\r\n", *tmp);
+          int *icm_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t));
+          Serial1.printf("%d\r\n", *icm_data);
         }
         else
         {
@@ -310,7 +308,7 @@ void loop()
   if (liftoff)
   {
     Serial1.println("LIFTOFF !!!");
-    Serial2.println('l');
+    Serial2.print('l');
     liftoff_count++;
     if (liftoff_count > 5) // 冗長性の確保
     {
@@ -321,7 +319,7 @@ void loop()
   if (top)
   {
     Serial1.println("PARACHUTE OPENED !!!");
-    Serial2.println('t');
+    Serial2.print('t');
     top_count++;
     if (top_count > 5) // 冗長性の確保
     {
