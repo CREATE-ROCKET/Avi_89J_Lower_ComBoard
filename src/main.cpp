@@ -35,7 +35,7 @@ typedef struct
   char data[100] = {};
   int index = 0;
   int count = 0;
-  uint32_t flash_address = 0x1000000; // 128Mbitの半分　最大:0x2000000
+  uint32_t flash_address = 0x1800000; // 128Mbitの半分　最大:0x2000000
   bool flash_ok = false;
 } PITOT;
 
@@ -58,8 +58,8 @@ Flash flash1;
 
 void setup()
 {
-  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 18ch
-  Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 26ch
+  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 26ch
+  Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 18ch
   Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
   // Serial.begin(115200); //通信試験用
   // while (!Serial);
@@ -189,23 +189,23 @@ void loop()
           }
           break;
         default: // 数字のとき0以外の適当な値
-          // int *tmp = reinterpret_cast<int *>(Data.data[0]);
-          // Serial1.printf("%d\r\n", *tmp);
           Serial1.printf("%d\r\n", Data.data[0]);
           break;
         }
         break;
       case 2:
         Serial1.printf("Can received!!!: ");
-        // if (*(reinterpret_cast<int *>(Data.data[0])) == 189) // lpsのWhoAMI値
-        // {
-        // }
-        // // ICM
-        if (Data.data[0])
+        if (Data.data[0] == '$')
+        {
+          Serial1.printf("WhoAmI: %d", Data.data[1]);
+        }
+        else
+        {
           for (int i = 0; i < 2; i++)
           {
             Serial1.printf("%c", Data.data[i]);
           }
+        }
         Serial1.printf("\r\n");
         break;
       case 3:
@@ -225,11 +225,27 @@ void loop()
       break;
       case 5:
         Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 5; i++)
+        if (Data.data[0] == 189) // lpsのWhoAmI値
         {
-          Serial1.printf("%c", Data.data[i]);
+          Serial1.printf("LPS Data: ");
+          char lps_data[4] = {Data.data[1], Data.data[2], Data.data[3], Data.data[4]};
+          int *tmp = reinterpret_cast<int *>(lps_data);
+          Serial1.printf("%d\r\n", *tmp);
         }
-        Serial1.printf("\r\n");
+        else if (Data.data[0] == 18) // ICMのWhoAmI
+        {
+          Serial1.printf("ICM Data: ");
+          char icm_data[4] = {Data.data[1], Data.data[2], Data.data[3], Data.data[4]};
+          int *tmp = reinterpret_cast<int *>(icm_data);
+          Serial1.printf("%d\r\n", *tmp);
+        }
+        else
+        {
+          for (int i = 0; i < 5; i++)
+          {
+            Serial1.printf("%d\r\n", Data.data[i]);
+          }
+        }
         break;
       case 6:
         Serial1.printf("Can received!!!: ");
@@ -318,7 +334,7 @@ void loop()
     // GPS
     char gps_read = Serial.read();
     Serial1.write(gps_read);
-
+    Serial2.printf("%c", gps_read);
     gps.data[gps.index] = gps_read;
     gps.index++;
     if (gps_read == 0x0A) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
@@ -327,7 +343,6 @@ void loop()
       for (int i = 0; i < 100; i++)
       {
         Serial1.printf("%c", gps.data[i]);
-        Serial2.printf("%c", gps.data[i]);
         if (i == gps.index)
         {
           Serial1.println();
