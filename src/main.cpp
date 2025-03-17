@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <stdlib.h>
 #include <CANCREATE.h>
 #include <SPICREATE.h>
 #include <SPIflash.h>
@@ -26,54 +25,45 @@
 
 uint8_t tx_gps[256] = {};
 uint8_t tx_pitot[256] = {};
-int elapsed_time = 0;
+bool top = false;
+bool liftoff = false;
+int liftoff_count = 0; // 冗長性のため
+int top_count = 0;     // 冗長性のため
 
 typedef struct
 {
-  char data[100] = {}; // flashに保存するために1センテンスを保存するのに使う
-  int index = 0;       //
-  // int count = 0;
+  char data[100] = {};
+  int index = 0;
+  int count = 0;
   uint32_t flash_address = 0x1000000; // 128Mbitの半分　0x2000000
-  bool flash_ok = false;              // flash書き込み開始・終了に用いる
-} PITOT;                              // 送られてくるピトー管のデータを保管するための構造体
+  bool flash_ok = false;
+} PITOT;
 
 typedef struct
 {
-  char data[100] = {}; // flashに保存するためにgpggaの１センテンスを保存するのに使う
-  int index = 0;       // 1回のループでのGPGGA表示の一文字を保存する位置
-  // int count = 0;
+  char data[100] = {};
+  int index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
+  int count = 0;
   uint32_t flash_address = 0x00;
-  bool flash_ok = false; // flash書き込み開始・終了に用いる
-  // char parsed[100] = {}; // チェックサムの計算のためNMEAフォーマットの$と*を除外
-} GPS; // 取得したGPSデータを扱う構造体
+  char parsed[100] = {}; // チェックサムの計算のためNMEAフォーマットの$と*を除外
+  bool flash_ok = false;
+} GPS;
 
-typedef struct
-{
-  char data[10] = {}; // UTC時間なので後で+9時間する
-  int index = 0;      // gpggaのセンテンスを時間のところだけパースするために使う変数
-  int hour = 0;
-  int min = 0;
-  int sec = 0;
-} TIME; // gnggaで受け取れる時間についての構造体
-
-typedef struct
-{
-  bool status = false; // 機体が離床した・頂点に来たなどを判別する変数
-  int count = 0;       // 冗長性のため
-  int hour = 0;
-  int min = 0;
-  int sec = 0;
-} ST; // 機体が離床した・頂点に来たなどを判別する構造体
+// typedef struct
+// {
+//   int correct;
+//   int index = 0;
+//   int gps = 0;
+//   int tmp[2] = {};
+// } CHECKSUM;
 
 // int test_count = 0; // 通信試験用
 PITOT pitot;
 GPS gps;
-TIME time;
-ST liftoff;
-ST top;
+// CHECKSUM checksum;
 CAN_CREATE CAN(true);
-SPICREATE::SPICreate SPIC1; // platformio.iniで@4.2.0に固定しないと動かない
-Flash flash1;               // platformio.iniで@4.2.0に固定しないと動かない
+SPICREATE::SPICreate SPIC1;
+Flash flash1;
 
 void setup()
 {
@@ -104,23 +94,23 @@ void setup()
       ;
   }
 
-  // switch (CAN.test()) //CANデバッグ用
-  // {
-  // case CAN_SUCCESS:
-  //   Serial1.println("Success!!!");
-  //   break;
-  // case CAN_UNKNOWN_ERROR:
-  //   Serial1.println("Unknown error occurred");
-  //   break;
-  // case CAN_NO_RESPONSE_ERROR:
-  //   Serial1.println("No response error");
-  //   break;
-  // case CAN_CONTROLLER_ERROR:
-  //   Serial1.println("CAN CONTROLLER ERROR");
-  //   break;
-  // default:
-  //   break;
-  // }
+  switch (CAN.test()) // CANデバッグ用
+  {
+  case CAN_SUCCESS:
+    Serial1.println("Success!!!");
+    break;
+  case CAN_UNKNOWN_ERROR:
+    Serial1.println("Unknown error occurred");
+    break;
+  case CAN_NO_RESPONSE_ERROR:
+    Serial1.println("No response error");
+    break;
+  case CAN_CONTROLLER_ERROR:
+    Serial1.println("CAN CONTROLLER ERROR");
+    break;
+  default:
+    break;
+  }
 }
 
 void loop()
@@ -188,21 +178,28 @@ void loop()
     }
     else
     {
-      switch (Data.size) // CANで受け取る文字数で場合分け
+      switch (Data.size)
       {
       case 1:
-        switch (Data.data[0])
+        switch (isdigit(Data.data[0]))
         {
-        case 'l': // liftoff
-          liftoff.status = true;
-          break;
-        case 't': // 頂点検知・開傘
-          top.status = true;
-          break;
-        default:
-          Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
-          break;
+        case 0: // 文字のとき0
+          if (Data.data[0] == 'l')
+          {
+            liftoff = true;
+          }
+          else if (Data.data[0] == 't')
+          {
+            top = true;
+          }
+          else
+          {
+            Serial1.printf("Can received!!!: %d\n\r", Data.data[0]);
+          }
         }
+        break;
+      default:
+        Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
         break;
       case 2:
         Serial1.printf("Can received!!!: ");
@@ -221,13 +218,12 @@ void loop()
         Serial1.printf("\r\n");
         break;
       case 4:
+      {
         Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 4; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
+        int *tmp = reinterpret_cast<int *>(Data.data);
+        Serial1.printf("%d\r\n", *tmp);
+      }
+      break;
       case 5:
         Serial1.printf("Can received!!!: ");
         for (int i = 0; i < 5; i++)
@@ -260,69 +256,49 @@ void loop()
         }
         Serial1.printf("\r\n");
         break;
-      default:
-        Serial1.printf("Unexpected can data!\r\n");
       }
     }
   }
 
   if (Serial2.available())
   {
-    char cmd_2 = Serial2.read();
-    switch (cmd_2)
+    char pitot_read = Serial2.read();
+    pitot.data[pitot.index] = pitot_read;
+    pitot.index++;
+    if (pitot_read == '\n') // 終了
     {
-    case 'q': // 上段のコマンドは無視
-    case 'e': // 上段のコマンドは無視
-    case 's': // 上段のコマンドは無視
-    default:
-      char pitot_read = cmd_2;
-      pitot.data[pitot.index] = pitot_read;
-      pitot.index++;
-      if (pitot_read == '\n') // 終了
+      for (int i = 0; i < pitot.index; i++)
       {
-        for (int i = 0; i < pitot.index; i++)
-        {
-          tx_pitot[i] = pitot.data[pitot.index];
-        }
-        if (pitot.flash_ok) // flashの書き込み開始
-        {
-          flash1.write(pitot.flash_address, tx_pitot);
-          pitot.flash_address += 0x1000100;
-        }
-        pitot.index = 0;
+        tx_pitot[i] = pitot.data[pitot.index];
       }
+      if (pitot.flash_ok) // flashの書き込み開始
+      {
+        flash1.write(pitot.flash_address, tx_pitot);
+        pitot.flash_address += 0x1000100;
+      }
+      pitot.index = 0;
     }
   }
 
-  if (liftoff.status)
+  if (liftoff)
   {
-    Serial1.println();
     Serial1.println("LIFTOFF !!!");
-    Serial1.printf("離床時刻: %d時%d分%d秒\r\n", liftoff.hour, liftoff.min, liftoff.sec);
-    Serial2.printf("離床時刻: %d時%d分%d秒\r\n", liftoff.hour, liftoff.min, liftoff.sec);
-    Serial1.println();
-    Serial2.print('l');
-    liftoff.count++;
-    if (liftoff.count > 5) // 冗長性の確保
+    Serial2.println('l');
+    liftoff_count++;
+    if (liftoff_count > 5) // 冗長性の確保
     {
-      liftoff.status = false;
+      liftoff = false;
     }
   }
 
-  if (top.status)
+  if (top)
   {
-    Serial1.println();
     Serial1.println("PARACHUTE OPENED !!!");
-    Serial1.printf("開傘時刻: %d時%d分%d秒\r\n", top.hour, top.min, top.sec);
-    Serial2.printf("開傘時刻: %d時%d分%d秒\r\n", top.hour, top.min, top.sec);
-    Serial1.println();
-    Serial2.print('t');
-    top.count++;
-    if (top.count > 5) // 冗長性の確保
+    Serial2.println('t');
+    top_count++;
+    if (top_count > 5) // 冗長性の確保
     {
-      elapsed_time = 3600 * (top.hour - liftoff.hour) + 60 * (top.min - liftoff.min) + top.sec - liftoff.sec;
-      Serial1.printf("離床検知から開傘まで: %d秒\r\n", elapsed_time);
-      top.status = false;
+      top = false;
     }
   }
 
@@ -347,35 +323,6 @@ void loop()
           Serial2.println();
         }
       }
-      // gpggaの時間に関する部分だけ保存
-      while (gps.data[time.index] != ',')
-      {
-        time.index++;
-      }
-      time.index++;
-      int tmp = 0;
-      while (gps.data[time.index] != '.')
-      {
-        time.data[tmp] = gps.data[time.index];
-        tmp++;
-        time.index++;
-      }
-      time.hour = (int)time.data[0] * 10 + (int)time.data[1] + 9;
-      time.min = (int)time.data[2] * 10 + (int)time.data[3];
-      time.sec = (int)time.data[4] * 10 + (int)time.data[5];
-      if (liftoff.status && liftoff.count == 0)
-      {
-        liftoff.hour = time.hour;
-        liftoff.min = time.min;
-        liftoff.sec = time.sec;
-      }
-      if (top.status && top.count == 0)
-      {
-        top.hour = time.hour;
-        top.min = time.min;
-        top.sec = time.sec;
-      }
-
       gps.index = 0;
       // Serial.println("hoge hoge");//デバッグ用
       if (gps.flash_ok)
@@ -387,12 +334,9 @@ void loop()
         flash1.write(gps.flash_address, tx_gps);
         gps.flash_address += 0x100;
       }
-      if (gps.flash_address >= 0x1000000)
-      {
-        gps.flash_ok = false;
-      }
 
       // Serial.println("hoge");//デバッグ用
+      // }
     }
   }
 }
