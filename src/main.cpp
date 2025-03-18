@@ -62,9 +62,9 @@ void setup()
   Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 18ch
   Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
   // Serial.begin(115200); //通信試験用
-  // while (!Serial);
 
   Serial1.println("COMBOARD");
+  Serial2.println("COMBOARD");
 
   SPIC1.begin(VSPI, SCK, MISO, MOSI);
   flash1.begin(&SPIC1, FLASH_CS, SPI_FREQUENCY);
@@ -147,6 +147,7 @@ void loop()
     else if (cmd == 'S')
     {
       /*シーケンス開始(flashの書き込み開始)*/
+      Serial1.printf("SEQUENCE START!!!\r\n");
       Serial1.printf("FLASH START!!!\r\n");
       gps.flash_ok = true; // flashの書き込み開始
       pitot.flash_ok = true;
@@ -174,12 +175,12 @@ void loop()
       case 1:
         switch (isdigit(Data.data[0]))
         {
-        case 0: // 文字のとき0
-          if (Data.data[0] == 'l')
+        case 0:                    // 文字のとき0
+          if (Data.data[0] == 'l') // 離床検知
           {
             liftoff = true;
           }
-          else if (Data.data[0] == 't')
+          else if (Data.data[0] == 't') // 頂点検知
           {
             top = true;
           }
@@ -188,8 +189,8 @@ void loop()
             Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
           }
           break;
-        default: // 数字のとき0以外の適当な値
-          Serial1.printf("%d\r\n", Data.data[0]);
+        default:                                  // 数字のとき0以外の適当な値
+          Serial1.printf("%d\r\n", Data.data[0]); // char型をint型にキャスト
           break;
         }
         break;
@@ -197,7 +198,7 @@ void loop()
         Serial1.printf("Can received!!!: ");
         if (Data.data[0] == '$')
         {
-          Serial1.printf("WhoAmI: %d", Data.data[1]);
+          Serial1.printf("WhoAmI: %d", Data.data[1]); // lps,icmのWhoAmI値を表示
         }
         else
         {
@@ -228,7 +229,7 @@ void loop()
         if (Data.data[0] == 189) // lpsのWhoAmI値
         {
           Serial1.printf("LPS Data: ");
-          int *lps_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t));
+          int *lps_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t)); // reinterpret_castでData.dataのメモリから後ろ4つまでを強引にint型として読む。
           Serial1.printf("%d\r\n", *lps_data);
         }
         else if (Data.data[0] == 18) // ICMのWhoAmI
@@ -308,10 +309,10 @@ void loop()
   if (liftoff)
   {
     Serial1.println("LIFTOFF !!!");
-    Serial2.print('l');
     liftoff_count++;
     if (liftoff_count > 5) // 冗長性の確保
     {
+      Serial2.print('l');
       liftoff = false;
     }
   }
@@ -319,10 +320,10 @@ void loop()
   if (top)
   {
     Serial1.println("PARACHUTE OPENED !!!");
-    Serial2.print('t');
     top_count++;
     if (top_count > 5) // 冗長性の確保
     {
+      Serial2.print('t');
       top = false;
     }
   }
