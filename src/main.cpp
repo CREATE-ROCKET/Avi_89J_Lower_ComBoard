@@ -26,6 +26,7 @@
 uint8_t tx_gps[256] = {};
 uint8_t tx_pitot[256] = {};
 uint8_t rx[256]{};
+uint32_t read_flash_address = 0;
 bool top = false;
 bool liftoff = false;
 int liftoff_count = 0; // 冗長性のため
@@ -33,17 +34,17 @@ int top_count = 0;     // 冗長性のため
 
 typedef struct
 {
-  char data[100] = {};
+  char data[100] = {}; // 100は80以上の適当な数字
   int index = 0;
   int count = 0;
-  uint32_t flash_address = 0x1800000; // 128Mbitの半分　最大:0x2000000
+  uint32_t flash_address = 0x1800000; // 128Mbitの半分　最大:0x2000000 (= 16*6)
   bool flash_ok = false;
 } PITOT;
 
 typedef struct
 {
-  char data[100] = {};
-  int index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
+  char data[100] = {}; // 100は80以上の適当な数字
+  int index = 0;       // 1回のループでのGPGGA表示の一文字を保存する位置
   int count = 0;
   uint32_t flash_address = 0x00;
   bool flash_ok = false;
@@ -135,7 +136,7 @@ void loop()
       /*flash書き込み終了*/
       gps.flash_ok = false; // flashの書き込み終了
       pitot.flash_ok = false;
-      if (CAN.sendChar('Q'))
+      if (CAN.sendChar('Q')) // log基板に
       {
         Serial1.println("failed to send CAN data");
       }
@@ -182,10 +183,14 @@ void loop()
     }
     else if (cmd == 'r') // flashよみとり
     {
-      flash1.read(0, rx);
-      for (int i = 0; i < 256; i++)
+      for (int j = 0; j < 65536; j++) // 0x2000000 ÷ 256 = 65536
       {
-        Serial1.printf("%d", rx[i]);
+        read_flash_address = 256 * j;
+        flash1.read(read_flash_address, rx);
+        for (int i = 0; i < 256; i++)
+        {
+          Serial1.printf("%c", rx[i]);
+        }
       }
     }
     else
@@ -246,14 +251,6 @@ void loop()
         }
         Serial1.printf("\r\n");
         break;
-      case 3:
-        Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 3; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
       case 4:
       {
         Serial1.printf("Can received!!!: ");
@@ -290,30 +287,6 @@ void loop()
           }
         }
         break;
-      case 6:
-        Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 6; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
-      case 7:
-        Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 7; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
-      case 8:
-        Serial1.printf("Can received!!!: ");
-        for (int i = 0; i < 8; i++)
-        {
-          Serial1.printf("%c", Data.data[i]);
-        }
-        Serial1.printf("\r\n");
-        break;
       default:
         Serial1.printf("Unexpected Can data!!!\r\n");
       }
@@ -324,10 +297,12 @@ void loop()
   {
 
     char pitot_read = Serial2.read();
+    Serial1.printf("FROM UPPER COM: %c", pitot_read);
     pitot.data[pitot.index] = pitot_read;
     pitot.index++;
     if (pitot_read == '\n') // 終了
     {
+      Serial1.printf("\r\n");
       for (int i = 0; i < pitot.index; i++)
       {
         tx_pitot[i] = pitot.data[pitot.index];
@@ -344,7 +319,7 @@ void loop()
       flash1.write(pitot.flash_address, tx_pitot);
       pitot.flash_address += 0x100;
     }
-    if (pitot.flash_address == 0x2000000)
+    if (pitot.flash_address == 0x2000000) // 配列外アクセスしないように
     {
       pitot.flash_ok = false;
     }
@@ -363,26 +338,35 @@ void loop()
 
   if (top)
   {
-    Serial1.println("\e[31mPARACHUTE OPENED !!!\e[0m");
-    top_count++;
-    if (top_count > 5) // 冗長性の確保
+    if (top_count < 5)
     {
-      Serial2.print('t');
-      top = false;
+      Serial1.println("\e[31mPARACHUTE OPENED !!!\e[0m");
+    }
+    top_count++;
+    if (top_count >= 5) // 冗長性の確保
+    {
+      for (int i = 0; i < 100; i++) // 頂点検知したらGPS表示の色を黄色に変える　->ansiエスケープ
+      {
+        Serial1.printf("\e[32%c\e[0", gps.data[i]);
+        if (i == gps.index)
+        {
+          Serial1.printf("\r\n");
+        }
+      }
     }
   }
 
   if (Serial.available())
   {
     // GPS
+    Serial1.printf("\e[0]");
     char gps_read = Serial.read();
     Serial1.write(gps_read);
     Serial2.write(gps_read);
     gps.data[gps.index] = gps_read;
     gps.index++;
-    if (gps_read == 0x0A) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
+    if (gps_read == 0x0A || gps.index >= 85) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
     {
-      Serial1.print("GPS: ");
       // for (int i = 0; i < 100; i++)
       // {
       //   Serial1.printf("%c", gps.data[i]);
