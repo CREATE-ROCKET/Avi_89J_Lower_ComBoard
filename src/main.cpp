@@ -25,6 +25,7 @@
 
 uint8_t tx_gps[256] = {};
 uint8_t tx_pitot[256] = {};
+uint8_t rx[256]{};
 bool top = false;
 bool liftoff = false;
 int liftoff_count = 0; // 冗長性のため
@@ -45,7 +46,6 @@ typedef struct
   int index = 0; // 1回のループでのGPGGA表示の一文字を保存する位置
   int count = 0;
   uint32_t flash_address = 0x00;
-  char parsed[100] = {}; // チェックサムの計算のためNMEAフォーマットの$と*を除外
   bool flash_ok = false;
 } GPS;
 
@@ -121,13 +121,13 @@ void loop()
     Serial1.print(" Sending packet ... ");
     Serial1.println(cmd);
 
-    if (cmd == 'g')
+    if (cmd == 'g') // sequenceより前にgpsを開始しないと衛星探す時間がとれない
     {
-      /* GPSロギング、計測開始 */
+      /* GPS計測開始 */
       digitalWrite(GPS_SW, HIGH);
       Serial1.println("GPS START !!!");
     }
-    else if (cmd == 'Q')
+    else if (cmd == 'Q') // sequence 停止
     {
       /* GPSロギング、計測終了 */
       digitalWrite(GPS_SW, LOW);
@@ -135,22 +135,58 @@ void loop()
       /*flash書き込み終了*/
       gps.flash_ok = false; // flashの書き込み終了
       pitot.flash_ok = false;
+      if (CAN.sendChar('Q'))
+      {
+        Serial1.println("failed to send CAN data");
+      }
     }
-    else if (cmd == 'e')
+    else if (cmd == 'e') // flash erase
     {
       /* メモリデータ消去 */
+      Serial1.printf("FLASH ERASE START!!!");
       flash1.erase();
       Serial1.println("ERASED !!!");
       gps.flash_address = 0x00;
-      pitot.flash_address = 0x1000000;
+      pitot.flash_address = 0x1800000;
     }
     else if (cmd == 'S')
     {
       /*シーケンス開始(flashの書き込み開始)*/
-      Serial1.printf("SEQUENCE START!!!\r\n");
-      Serial1.printf("FLASH START!!!\r\n");
       gps.flash_ok = true; // flashの書き込み開始
       pitot.flash_ok = true;
+      if (CAN.sendChar('S'))
+      {
+        Serial1.println("failed to send CAN data");
+      }
+      digitalWrite(GPS_SW, HIGH);
+      Serial1.printf("SEQUENCE START!!!\r\n");
+      Serial1.printf("FLASH START!!!\r\n");
+      Serial1.printf("GPS START !!!\r\n");
+    }
+    else if (cmd == 'C') // CAN test用
+    {
+      switch (CAN.test())
+      {
+      case CAN_SUCCESS:
+        Serial1.println("CAN Success!!!");
+        break;
+      case CAN_UNKNOWN_ERROR:
+        Serial1.println("CAN Unknown error occurred");
+        break;
+      case CAN_NO_RESPONSE_ERROR:
+        Serial1.println("CAN No response error");
+        break;
+      case CAN_CONTROLLER_ERROR:
+        Serial1.println("CAN CONTROLLER ERROR");
+      }
+    }
+    else if (cmd == 'r') // flashよみとり
+    {
+      flash1.read(0, rx);
+      for (int i = 0; i < 256; i++)
+      {
+        Serial1.printf("%d", rx[i]);
+      }
     }
     else
     {
@@ -173,6 +209,7 @@ void loop()
       switch (Data.size)
       {
       case 1:
+        Serial1.printf("Can received!!!: ");
         switch (isdigit(Data.data[0]))
         {
         case 0:                    // 文字のとき0
@@ -186,7 +223,7 @@ void loop()
           }
           else
           {
-            Serial1.printf("Can received!!!: %c\n\r", Data.data[0]);
+            Serial1.printf("%c\n\r", Data.data[0]);
           }
           break;
         default:                                  // 数字のとき0以外の適当な値
@@ -220,8 +257,15 @@ void loop()
       case 4:
       {
         Serial1.printf("Can received!!!: ");
-        int *tmp = reinterpret_cast<int *>(Data.data);
-        Serial1.printf("%d\r\n", *tmp);
+        if (isdigit(Data.data[0])) // 文字のとき0
+        {
+          Serial1.printf("%c\r\n");
+        }
+        else // 数字のとき
+        {
+          int *tmp = reinterpret_cast<int *>(Data.data);
+          Serial1.printf("%d\r\n", *tmp);
+        }
       }
       break;
       case 5:
@@ -308,7 +352,7 @@ void loop()
 
   if (liftoff)
   {
-    Serial1.println("LIFTOFF !!!");
+    Serial1.println("\e[31mLIFTOFF !!!\e[0m");
     liftoff_count++;
     if (liftoff_count > 5) // 冗長性の確保
     {
@@ -319,7 +363,7 @@ void loop()
 
   if (top)
   {
-    Serial1.println("PARACHUTE OPENED !!!");
+    Serial1.println("\e[31mPARACHUTE OPENED !!!\e[0m");
     top_count++;
     if (top_count > 5) // 冗長性の確保
     {
@@ -333,21 +377,21 @@ void loop()
     // GPS
     char gps_read = Serial.read();
     Serial1.write(gps_read);
-    Serial2.printf("%c", gps_read);
+    Serial2.write(gps_read);
     gps.data[gps.index] = gps_read;
     gps.index++;
     if (gps_read == 0x0A) // 終端文字、またはGPGGAの表示列が一個分終わったとき(nmeaフォーマットでgpggaの最大文字数は改行文字を含めて82)
     {
       Serial1.print("GPS: ");
-      for (int i = 0; i < 100; i++)
-      {
-        Serial1.printf("%c", gps.data[i]);
-        if (i == gps.index)
-        {
-          Serial1.println();
-          Serial2.println();
-        }
-      }
+      // for (int i = 0; i < 100; i++)
+      // {
+      //   Serial1.printf("%c", gps.data[i]);
+      //   if (i == gps.index)
+      //   {
+      //     Serial1.println();
+      //     Serial2.println();
+      //   }
+      // }
       gps.index = 0;
       // Serial.println("hoge hoge");//デバッグ用
       if (gps.flash_ok)
@@ -358,6 +402,10 @@ void loop()
         }
         flash1.write(gps.flash_address, tx_gps);
         gps.flash_address += 0x100;
+      }
+      if (gps.flash_address == 0x1800000)
+      {
+        gps.flash_ok = false;
       }
 
       // Serial.println("hoge");//デバッグ用
