@@ -61,13 +61,13 @@ Flash flash1;
 
 void setup()
 {
-  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back);   // 本部 26ch
-  Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 18ch
+  Serial1.begin(115200, SERIAL_8N1, TWELITE_RX_back, TWELITE_TX_back); // 本部 26ch
+  // Serial2.begin(115200, SERIAL_8N1, TWELITE_RX_front, TWELITE_TX_front); // 上部基板 18ch
   Serial.begin(9600, SERIAL_8N1, GPS_RXD_TX, GPS_TXD_RX);
   // Serial.begin(115200); //通信試験用
 
   Serial1.println("COMBOARD");
-  Serial2.println("COMBOARD");
+  // Serial2.println("COMBOARD");
 
   SPIC1.begin(VSPI, SCK, MISO, MOSI);
   flash1.begin(&SPIC1, FLASH_CS, SPI_FREQUENCY);
@@ -130,10 +130,10 @@ void loop()
       digitalWrite(GPS_SW, HIGH);
       Serial1.println("GPS START !!!");
     }
-    else if(cmd == 'h')
+    else if (cmd == 'h')
     {
       /* GPSロギング、計測終了 */
-      digitalWrite(GPS_SW,LOW);
+      digitalWrite(GPS_SW, LOW);
       Serial1.println("GPS STOP");
     }
     else if (cmd == 'Q') // sequence 停止
@@ -187,7 +187,7 @@ void loop()
         Serial1.println("CAN CONTROLLER ERROR");
       }
     }
-    else if (cmd == 'r') // flashよみとり(今は試運転)
+    else if (cmd == 'r') // flashよみとり(射場で見る用)
     {
       for (int j = 0; j < 3; j++) // 0x2000000 ÷ 256 = 65536
       {
@@ -195,7 +195,7 @@ void loop()
         flash1.read(read_flash_address, rx);
         for (int i = 0; i < 256; i++)
         {
-          Serial1.printf("%c", rx[i]);
+          Serial1.printf("%d", rx[i]);
         }
       }
     }
@@ -213,7 +213,7 @@ void loop()
     can_return_t Data;
     if (CAN.readWithDetail(&Data))
     {
-      Serial.println("failed to get CAN data");
+      Serial1.println("failed to get CAN data");
     }
     else
     {
@@ -246,7 +246,7 @@ void loop()
         // Serial1.printf("Can received: ");
         if (Data.data[0] == '$')
         {
-          Serial1.printf("WhoAmI: %d", Data.data[1]); // lps,icmのWhoAmI値を表示
+          Serial1.printf("W%d, ", Data.data[1]); // lps,icmのWhoAmI値を表示
         }
         else
         {
@@ -262,12 +262,12 @@ void loop()
         // Serial1.printf("Can received: ");
         if (isdigit(Data.data[0])) // 文字のとき0
         {
-          Serial1.printf("%c\r\n");
+          Serial1.printf("%c");
         }
         else // 数字のとき
         {
           int *tmp = reinterpret_cast<int *>(Data.data);
-          Serial1.printf("%d\r\n", *tmp);
+          Serial1.printf("%d", *tmp);
         }
       }
       break;
@@ -275,21 +275,21 @@ void loop()
         // Serial1.printf("Can received: ");
         if (Data.data[0] == 189) // lpsのWhoAmI値
         {
-          Serial1.printf("LPS Data: ");
+          Serial1.printf("L");
           int *lps_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t)); // reinterpret_castでData.dataのメモリから後ろ4つまでを強引にint型として読む。
-          Serial1.printf("%d\r\n", *lps_data);
+          Serial1.printf("%d, ", *lps_data);
         }
         else if (Data.data[0] == 18) // ICMのWhoAmI
         {
-          Serial1.printf("ICM Data: ");
+          Serial1.printf("I");
           int *icm_data = reinterpret_cast<int *>(Data.data + sizeof(uint8_t));
-          Serial1.printf("%d\r\n", *icm_data);
+          Serial1.printf("%d ,", *icm_data);
         }
         else
         {
           for (int i = 0; i < 5; i++)
           {
-            Serial1.printf("%d\r\n", Data.data[i]);
+            Serial1.printf("%d,", Data.data[i]);
           }
         }
         break;
@@ -299,37 +299,37 @@ void loop()
     }
   }
 
-  if (Serial2.available())
-  {
+  // if (Serial2.available())
+  // {
 
-    char pitot_read = Serial2.read();
-    Serial1.printf("FROM UPPER COM: %c", pitot_read);
-    pitot.data[pitot.index] = pitot_read;
-    pitot.index++;
-    if (pitot_read == '\n') // 終了
-    {
-      Serial1.printf("\r\n");
-      for (int i = 0; i < pitot.index; i++)
-      {
-        tx_pitot[i] = pitot.data[pitot.index];
-      }
-      if (pitot.flash_ok) // flashの書き込み開始
-      {
-        flash1.write(pitot.flash_address, tx_pitot);
-        pitot.flash_address += 0x100;
-      }
-      pitot.index = 0;
-    }
-    if (pitot.flash_ok) // flashの書き込み開始
-    {
-      flash1.write(pitot.flash_address, tx_pitot);
-      pitot.flash_address += 0x100;
-    }
-    if (pitot.flash_address == 0x2000000) // 配列外アクセスしないように
-    {
-      pitot.flash_ok = false;
-    }
-  }
+  //   char pitot_read = Serial2.read();
+  //   Serial1.printf("FROM UPPER COM: %c", pitot_read);
+  //   pitot.data[pitot.index] = pitot_read;
+  //   pitot.index++;
+  //   if (pitot_read == '\n') // 終了
+  //   {
+  //     Serial1.printf("\r\n");
+  //     for (int i = 0; i < pitot.index; i++)
+  //     {
+  //       tx_pitot[i] = pitot.data[pitot.index];
+  //     }
+  //     if (pitot.flash_ok) // flashの書き込み開始
+  //     {
+  //       flash1.write(pitot.flash_address, tx_pitot);
+  //       pitot.flash_address += 0x100;
+  //     }
+  //     pitot.index = 0;
+  //   }
+  //   if (pitot.flash_ok) // flashの書き込み開始
+  //   {
+  //     flash1.write(pitot.flash_address, tx_pitot);
+  //     pitot.flash_address += 0x100;
+  //   }
+  //   if (pitot.flash_address == 0x2000000) // 配列外アクセスしないように
+  //   {
+  //     pitot.flash_ok = false;
+  //   }
+  // }
 
   if (liftoff)
   {
