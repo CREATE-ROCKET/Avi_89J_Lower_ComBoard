@@ -29,8 +29,10 @@ uint8_t rx[256]{};
 uint32_t read_flash_address = 0;
 bool top = false;
 bool liftoff = false;
-int liftoff_count = 0; // 冗長性のため
-int top_count = 0;     // 冗長性のため
+// int liftoff_count = 5; // 冗長性のため
+int top_count = 0; // 冗長性のため
+int last_liftoff_time = 0;
+// int last_top_time = 0;
 
 typedef struct
 {
@@ -81,7 +83,7 @@ void setup()
   // start the CAN bus at 100 kbps
   if (CAN.begin(100E03, CAN_RX, CAN_TX, 10)) // 新しいcanライブラリ
   {
-    Serial1.println("Starting CAN failed !!!");
+    Serial1.println("Starting CAN failed");
     while (1)
       ;
   }
@@ -128,14 +130,20 @@ void loop()
       digitalWrite(GPS_SW, HIGH);
       Serial1.println("GPS START !!!");
     }
-    else if (cmd == 'Q') // sequence 停止
+    else if(cmd == 'h')
     {
       /* GPSロギング、計測終了 */
-      digitalWrite(GPS_SW, LOW);
-      Serial1.println("GPS STOP !!!");
+      digitalWrite(GPS_SW,LOW);
+      Serial1.println("GPS STOP");
+    }
+    else if (cmd == 'Q') // sequence 停止
+    {
+      Serial1.println("SEQUENCE END !!!");
       /*flash書き込み終了*/
       gps.flash_ok = false; // flashの書き込み終了
       pitot.flash_ok = false;
+      liftoff = false;
+      top = false;
       if (CAN.sendChar('Q')) // log基板に
       {
         Serial1.println("failed to send CAN data");
@@ -160,9 +168,7 @@ void loop()
         Serial1.println("failed to send CAN data");
       }
       digitalWrite(GPS_SW, HIGH);
-      Serial1.printf("SEQUENCE START!!!\r\n");
-      Serial1.printf("FLASH START!!!\r\n");
-      Serial1.printf("GPS START !!!\r\n");
+      Serial1.printf("SEQUENCE START !!!\r\n");
     }
     else if (cmd == 'C') // CAN test用
     {
@@ -181,9 +187,9 @@ void loop()
         Serial1.println("CAN CONTROLLER ERROR");
       }
     }
-    else if (cmd == 'r') // flashよみとり
+    else if (cmd == 'r') // flashよみとり(今は試運転)
     {
-      for (int j = 0; j < 65536; j++) // 0x2000000 ÷ 256 = 65536
+      for (int j = 0; j < 3; j++) // 0x2000000 ÷ 256 = 65536
       {
         read_flash_address = 256 * j;
         flash1.read(read_flash_address, rx);
@@ -214,7 +220,7 @@ void loop()
       switch (Data.size)
       {
       case 1:
-        Serial1.printf("Can received!!!: ");
+        // Serial1.printf("Can received: ");
         switch (isdigit(Data.data[0]))
         {
         case 0:                    // 文字のとき0
@@ -237,7 +243,7 @@ void loop()
         }
         break;
       case 2:
-        Serial1.printf("Can received!!!: ");
+        // Serial1.printf("Can received: ");
         if (Data.data[0] == '$')
         {
           Serial1.printf("WhoAmI: %d", Data.data[1]); // lps,icmのWhoAmI値を表示
@@ -253,7 +259,7 @@ void loop()
         break;
       case 4:
       {
-        Serial1.printf("Can received!!!: ");
+        // Serial1.printf("Can received: ");
         if (isdigit(Data.data[0])) // 文字のとき0
         {
           Serial1.printf("%c\r\n");
@@ -266,7 +272,7 @@ void loop()
       }
       break;
       case 5:
-        Serial1.printf("Can received!!!: ");
+        // Serial1.printf("Can received: ");
         if (Data.data[0] == 189) // lpsのWhoAmI値
         {
           Serial1.printf("LPS Data: ");
@@ -288,7 +294,7 @@ void loop()
         }
         break;
       default:
-        Serial1.printf("Unexpected Can data!!!\r\n");
+        Serial1.printf("Unexpected Can data\r\n");
       }
     }
   }
@@ -327,33 +333,52 @@ void loop()
 
   if (liftoff)
   {
-    Serial1.println("\e[31mLIFTOFF !!!\e[0m");
-    liftoff_count++;
-    if (liftoff_count > 5) // 冗長性の確保
+    if (millis() - last_liftoff_time > 100)
     {
-      Serial2.print('l');
-      liftoff = false;
+      Serial1.println("LIFTOFF !!!!!!!!!!!");
+      last_liftoff_time = millis();
     }
+    // if (liftoff_count == 500)
+    // {
+    //   Serial1.println("LIFTOFF !!!!!!!!!!!");
+    //   liftoff_count = 0;
+    // }
+    // liftoff_count++;
+    // liftoff_count++;
+    // if (liftoff_count > 5) // 冗長性の確保
+    // {
+    //   Serial2.print('l');
+    //   liftoff = false;
+    // }
   }
 
   if (top)
   {
-    if (top_count < 5)
+    // if (millis() - last_top_time > 100)
+    // {
+    //   Serial1.println("PARACHUTE OPENED !!!!!!");
+    //   last_top_time = millis();
+    // }
+    if (top_count < 3)
     {
-      Serial1.println("\e[31mPARACHUTE OPENED !!!\e[0m");
+      Serial1.println("PARACHUTE OPENED !!!!!!");
     }
     top_count++;
-    if (top_count >= 5) // 冗長性の確保
-    {
-      for (int i = 0; i < 100; i++) // 頂点検知したらGPS表示の色を黄色に変える　->ansiエスケープ
-      {
-        Serial1.printf("\e[32%c\e[0", gps.data[i]);
-        if (i == gps.index)
-        {
-          Serial1.printf("\r\n");
-        }
-      }
-    }
+    // {
+    //   Serial1.println("PARACHUTE OPENED !!!!!!!!!!!"); // 頂点検知したらGPS表示の色を黄色に変える　->ansiエスケープ
+    // }
+    // top_count++;
+    // if (top_count >= 5) // 冗長性の確保
+    // {
+    //   for (int i = 0; i < 100; i++)
+    //   {
+    //     Serial1.printf("%c", gps.data[i]);
+    //     if (i == gps.index)
+    //     {
+    //       Serial1.printf("\r\n");
+    //     }
+    //   }
+    // }
   }
 
   if (Serial.available())
