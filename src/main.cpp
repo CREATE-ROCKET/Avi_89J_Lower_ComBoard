@@ -199,6 +199,11 @@ void loop()
         }
       }
     }
+    else if (cmd == 'Z') // risyoutorikesi
+    {
+      liftoff = false;
+      CAN.sendChar('Z');
+    }
     else
     {
       if (CAN.sendChar(cmd))
